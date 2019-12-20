@@ -1,17 +1,19 @@
-#include <unistd.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <sys/epoll.h>
 #include <iostream>
-#include <future>
 #include "TcpServer.h"
 
 
 int main(int argc, char const *argv[]) {
-    auto serv = TcpServer(8085);
-    serv.Start();
-  //  std::this_thread::sleep_for(std::chrono::seconds(10));
-  // serv.Stop();
+    try {
+        auto serv = TcpServer(8083);
+        serv.Start();
+    } catch (const std::runtime_error &e) {
+        std::cout << e.what() << std::endl;
+    }
+    //  std::this_thread::sleep_for(std::chrono::seconds(10));
+    // serv.Stop();
 // nc -v localhost 8081
     return 0;
 }
