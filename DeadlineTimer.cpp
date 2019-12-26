@@ -1,5 +1,4 @@
-
-
+#include <iostream>
 #include "DeadlineTimer.h"
 
 void DeadlineTimer::Add(int fd) {
@@ -21,17 +20,20 @@ void DeadlineTimer::Update(int fd) {
 }
 
 int DeadlineTimer::GetNextDeadline() {
+    int res = 100;
     if (Queue.empty()) {
-        return -1;
+        return res;
     }
     auto it = Queue.begin();
-    int res = std::chrono::duration_cast<std::chrono::milliseconds>(it->first - std::chrono::steady_clock::now()).count();
+
+    res = std::min(res, (int)std::chrono::duration_cast<std::chrono::milliseconds>(
+            it->first - std::chrono::steady_clock::now()).count());
     return res;
 }
 
 std::vector<int> DeadlineTimer::GetOverdueFds() {
     std::vector<int> v;
-    for(auto fd: Queue) {
+    for (auto fd: Queue) {
         auto now = std::chrono::steady_clock::now();
         if (fd.first < now) {
             v.push_back(fd.second);

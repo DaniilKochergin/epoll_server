@@ -15,9 +15,11 @@ public:
 
     bool HaveQuotaToEvent(int fd);
 
-    void AddQuotaToAll();
+    void AddQuotaToAll(int64_t time);
 
     int64_t GetQuota(int fd);
+
+    size_t GetCountFd() const noexcept;
 
 private:
     std::unordered_map<int, int> FdToUser;

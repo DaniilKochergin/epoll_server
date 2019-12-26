@@ -19,20 +19,25 @@ void Communist::Remove(int fd) {
 }
 
 bool Communist::HaveQuotaToEvent(int fd) {
+    std::cout << Quota[FdToUser[fd]].first << std::endl;
     return Quota[FdToUser[fd]].first > 0;
 }
 
-void Communist::AddQuotaToAll() {
+void Communist::AddQuotaToAll(int64_t time) {
     for (auto &user : Quota) {
-        user.second.first += DEFAULT_QUOTA;
+        user.second.first += time;
     }
 }
 
 void Communist::Update(int fd, int64_t time) {
     Quota[FdToUser[fd]].first -= time;
-    std::cout<<time<<std::endl;
 }
 
 int64_t Communist::GetQuota(int fd) {
     return Quota[FdToUser[fd]].first;
 }
+
+size_t Communist::GetCountFd() const noexcept {
+    return Quota.size();
+}
+

@@ -5,6 +5,7 @@ set(CMAKE_CXX_STANDARD 17)
 
 SET(CMAKE_CXX_FLAGS -pthread)
 
-add_executable(untitled11 main.cpp TcpServer.cpp TcpServer.h DeadlineTimer.h DeadlineTimer.cpp Communist.h Communist.cpp)
+add_executable(untitled11 main.cpp TcpServer.cpp TcpServer.h DeadlineTimer.h DeadlineTimer.cpp Communist.h Communist.cpp
+        timer.h timer.cpp)
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address")

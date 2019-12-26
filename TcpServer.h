@@ -16,6 +16,8 @@ public:
 private:
     std::string ProcessRead(int n);
 
+    static std::vector<std::string> SplitTextByCharacter(const std::string &s, char delim);
+
     void ProcessWrite(const std::string &buf, int n);
 
     void AddConnection();
