@@ -3,15 +3,11 @@
 #include <sys/epoll.h>
 #include <iostream>
 #include "TcpServer.h"
-#include "../gtest/gtest.h"
-
-
-#define PORT 8087
 
 int main(int argc, char const *argv[]) {
     try {
-        auto serv = TcpServer(PORT);
-        serv.Start();
+        auto serv = TcpServer(8082);
+        serv.BlockingStart();
     } catch (const std::runtime_error &e) {
         std::cout << e.what() << std::endl;
     }

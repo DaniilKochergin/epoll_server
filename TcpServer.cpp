@@ -12,12 +12,13 @@
 #include <string>
 #include <sstream>
 
-#define MAX_SOCK_LISTEN 1024
+#define MAX_SOCK_LISTEN 1000000
 
 TcpServer::TcpServer(int port) :
         server_fd(socket(AF_INET, SOCK_STREAM, 0)),
         signal_fd(0) {
 
+    std::cout << "Create";
     sigset_t mask;
     sigemptyset(&mask);
     sigaddset(&mask, SIGINT);
@@ -66,6 +67,7 @@ void TcpServer::Loop() {
         for (int n = 0; n < nfds; ++n) {
             if (events[n].data.fd == server_fd) {
                 AddConnection();
+                std::cout << "Got connection" << std::endl;
             } else if (events[n].data.fd == signal_fd) {
                 ProcessSignalfd();
             } else {
@@ -98,15 +100,14 @@ void TcpServer::Loop() {
             close(fd);
             Timer.Remove(fd);
             Quota.Remove(fd);
+            std::cout << fd << std::endl;
         }
 
-        int64_t res = clock.get_time();
-        int64_t count = Quota.GetCountFd();
-        std::cout << res << " " << Quota.GetCountFd() << std::endl;
         Quota.AddQuotaToAll(std::max(clock.get_time() / std::max((int) Quota.GetCountFd(), 1), (int64_t) 1));
 
 
         if (NeedToStop) {
+            Quit = true;
             return;
         }
 
@@ -114,17 +115,18 @@ void TcpServer::Loop() {
 }
 
 TcpServer::~TcpServer() {
+    NeedToStop = true;
+    std::unique_lock<std::mutex> lg(m);
+    Stopped.wait(lg, [this] {
+        return Quit;
+    });
     close(signal_fd);
     close(server_fd);
 }
 
-void TcpServer::Stop() {
-    NeedToStop = true;
-}
-
-void TcpServer::Start() {
+void TcpServer::AsyncStart() {
     auto thr = std::thread([this]() { this->Loop(); });
-    thr.join();
+    thr.detach();
 }
 
 std::string TcpServer::ProcessRead(int n) {
@@ -139,18 +141,21 @@ std::string TcpServer::ProcessRead(int n) {
     } catch (...) {
         buf = "";
     }
-    std::cout << "Message from " << events[n].data.fd << ": \"" << buf << "\"\n";
+//    std::cout << "Message from " << events[n].data.fd << ": \"" << buf << "\"\n";
     return buf;
 }
 
 void TcpServer::ProcessWrite(const std::string &text, int n) {
     for (const auto &buf : SplitTextByCharacter(text, '\n')) {
-        struct addrinfo hints, *infoptr;
+        struct addrinfo hints{}, *infoptr = nullptr;
         hints.ai_family = AF_INET;
+        hints.ai_flags = 0;
+        hints.ai_socktype = SOCK_STREAM;
         if (int res = getaddrinfo(buf.data(), NULL, &hints, &infoptr)) {
             std::string error = gai_strerror(res);
             error.push_back('\n');
             write(events[n].data.fd, error.c_str(), error.size());
+            freeaddrinfo(infoptr);
             return;
         }
         struct addrinfo *p;
@@ -225,4 +230,13 @@ std::vector<std::string> TcpServer::SplitTextByCharacter(const std::string &s, c
         tokens.push_back(token);
     }
     return tokens;
+}
+
+void TcpServer::Stop() {
+    NeedToStop = true;
+}
+
+void TcpServer::BlockingStart() {
+    auto thr = std::thread([this]() { this->Loop(); });
+    thr.join();
 }

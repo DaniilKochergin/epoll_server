@@ -2,6 +2,10 @@
 
 #include "DeadlineTimer.h"
 #include "Communist.h"
+#include <atomic>
+#include <mutex>
+#include <condition_variable>
+#include <sys/epoll.h>
 
 class TcpServer {
 public:
@@ -9,9 +13,11 @@ public:
 
     ~TcpServer();
 
-    void Stop();
+    void AsyncStart();
 
-    void Start();
+    void BlockingStart();
+
+    void Stop();
 
 private:
     std::string ProcessRead(int n);
@@ -27,10 +33,13 @@ private:
     void Loop();
 
 private:
-    volatile bool NeedToStop = false;
+    std::atomic<bool> NeedToStop = false;
+    bool Quit = false;
     DeadlineTimer Timer;
     Communist Quota;
 
+    std::mutex m;
+    std::condition_variable Stopped;
     const int server_fd;
     int signal_fd{};
     int epollfd;

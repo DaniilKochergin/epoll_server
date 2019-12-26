@@ -19,7 +19,6 @@ void Communist::Remove(int fd) {
 }
 
 bool Communist::HaveQuotaToEvent(int fd) {
-    std::cout << Quota[FdToUser[fd]].first << std::endl;
     return Quota[FdToUser[fd]].first > 0;
 }
 

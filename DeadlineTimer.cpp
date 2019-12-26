@@ -41,4 +41,5 @@ std::vector<int> DeadlineTimer::GetOverdueFds() {
             return v;
         }
     }
+    return {};
 }
