@@ -67,7 +67,6 @@ void TcpServer::Loop() {
         for (int n = 0; n < nfds; ++n) {
             if (events[n].data.fd == server_fd) {
                 AddConnection();
-                std::cout << "Got connection" << std::endl;
             } else if (events[n].data.fd == signal_fd) {
                 ProcessSignalfd();
             } else {
@@ -90,6 +89,7 @@ void TcpServer::Loop() {
                 }
             }
 
+
             if (NeedToStop) {
                 return;
             }
@@ -100,7 +100,7 @@ void TcpServer::Loop() {
             close(fd);
             Timer.Remove(fd);
             Quota.Remove(fd);
-            std::cout << fd << std::endl;
+            std::cout << "Removed fd:" << fd << std::endl;
         }
 
         Quota.AddQuotaToAll(std::max(clock.get_time() / std::max((int) Quota.GetCountFd(), 1), (int64_t) 1));
@@ -141,7 +141,6 @@ std::string TcpServer::ProcessRead(int n) {
     } catch (...) {
         buf = "";
     }
-//    std::cout << "Message from " << events[n].data.fd << ": \"" << buf << "\"\n";
     return buf;
 }
 

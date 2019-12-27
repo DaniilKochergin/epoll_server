@@ -26,8 +26,8 @@ int DeadlineTimer::GetNextDeadline() {
     }
     auto it = Queue.begin();
 
-    res = std::min(res, (int)std::chrono::duration_cast<std::chrono::milliseconds>(
-            it->first - std::chrono::steady_clock::now()).count());
+    res = std::min(res, std::max((int) std::chrono::duration_cast<std::chrono::milliseconds>(
+            it->first - std::chrono::steady_clock::now()).count(), 100));
     return res;
 }
 
@@ -41,5 +41,5 @@ std::vector<int> DeadlineTimer::GetOverdueFds() {
             return v;
         }
     }
-    return {};
+    return v;
 }
