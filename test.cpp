@@ -12,7 +12,7 @@
 
 using namespace std;
 
-#define PORT 8083
+#define PORT 8082
 
 #define AFK_TIMEOUT 60
 

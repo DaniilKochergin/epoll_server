@@ -1,29 +1,21 @@
 #include <sys/socket.h>
-#include <netinet/in.h>
 #include <sys/epoll.h>
 #include <future>
 #include <zconf.h>
 #include "TcpServer.h"
-#include "timer.h"
-#include <csignal>
 #include <iostream>
-#include <sys/signalfd.h>
 #include <netdb.h>
 #include <string>
 #include <sstream>
+#include <memory>
 
 #define MAX_SOCK_LISTEN 1000000
+#define MAX_BUF_SIZE 10000
 
-TcpServer::TcpServer(int port) :
-        server_fd(socket(AF_INET, SOCK_STREAM, 0)),
-        signal_fd(0) {
+TcpServer::TcpServer(Context *context, int port) :
+        context(context),
+        server_fd(socket(AF_INET, SOCK_STREAM, 0)) {
 
-    std::cout << "Create";
-    sigset_t mask;
-    sigemptyset(&mask);
-    sigaddset(&mask, SIGINT);
-    sigaddset(&mask, SIGTERM);
-    sigaddset(&mask, SIGQUIT);
     address.sin_family = AF_INET;
     address.sin_addr.s_addr = INADDR_ANY;
     address.sin_port = htons(port);
@@ -37,146 +29,80 @@ TcpServer::TcpServer(int port) :
         throw std::runtime_error("Can't start listening server\n");
     }
 
-    if ((epollfd = epoll_create1(0)) == -1) {
-        throw std::runtime_error("Can't create epoll");
-    }
+
     ev.events = EPOLLIN;
     ev.data.fd = server_fd;
-    if (epoll_ctl(epollfd, EPOLL_CTL_ADD, server_fd, &ev) == -1) {
-        throw std::runtime_error("Can't create server_fd\n");
-    }
 
-    sigprocmask(SIG_BLOCK, &mask, nullptr);
-
-    if ((signal_fd = signalfd(-1, &mask, 0)) == -1) {
-        throw std::runtime_error("Can't create server, signalfd failed\n");
-    }
-
-    ev.events = EPOLLIN;
-    ev.data.fd = signal_fd;
-    if (epoll_ctl(epollfd, EPOLL_CTL_ADD, signal_fd, &ev)) {
-        throw std::runtime_error("Can't create signals handler\n");
-    }
-
-}
-
-void TcpServer::Loop() {
-    for (;;) {
-        int nfds = epoll_wait(epollfd, events, MAX_EVENTS, Timer.GetNextDeadline());
-        timer clock;
-        for (int n = 0; n < nfds; ++n) {
-            if (events[n].data.fd == server_fd) {
-                AddConnection();
-            } else if (events[n].data.fd == signal_fd) {
-                ProcessSignalfd();
-            } else {
-                Timer.Update(events[n].data.fd);
-                if (Quota.HaveQuotaToEvent(events[n].data.fd)) {
-                    auto time = std::chrono::steady_clock::now();
-                    try {
-                        auto buf = ProcessRead(n);
-                        ProcessWrite(buf, n);
-                    } catch (const std::runtime_error &e) {
-                        std::cout << e.what() << '\n';
-                    }
-                    Quota.Update(events[n].data.fd, std::chrono::duration_cast<std::chrono::milliseconds>(
-                            std::chrono::steady_clock::now() - time).count());
-                } else {
-                    ProcessRead(n);
-                    std::string retry =
-                            "Quota is over, retry via " + std::to_string(-Quota.GetQuota(events[n].data.fd)) + " ms";
-                    write(events[n].data.fd, retry.c_str(), retry.size());
-                }
-            }
+    context->AddEvent(address, server_fd, ev, this);
 
 
-            if (NeedToStop) {
-                return;
-            }
-        }
-
-
-        for (const auto fd : Timer.GetOverdueFds()) {
-            close(fd);
-            Timer.Remove(fd);
-            Quota.Remove(fd);
-            std::cout << "Removed fd:" << fd << std::endl;
-        }
-
-        Quota.AddQuotaToAll(std::max(clock.get_time() / std::max((int) Quota.GetCountFd(), 1), (int64_t) 1));
-
-
-        if (NeedToStop) {
-            Quit = true;
-            return;
-        }
-
-    }
 }
 
 TcpServer::~TcpServer() {
-    NeedToStop = true;
-    std::unique_lock<std::mutex> lg(m);
-    Stopped.wait(lg, [this] {
-        return Quit;
-    });
-    close(signal_fd);
     close(server_fd);
 }
 
-void TcpServer::AsyncStart() {
-    auto thr = std::thread([this]() { this->Loop(); });
-    thr.detach();
+
+void TcpServer::operator()() {
+    int addrlen = sizeof(address);
+    int conn_sock = accept(server_fd, (struct sockaddr *) &address,
+                           (socklen_t *) &addrlen);
+    if (conn_sock == -1) {
+        std::cout << "Accept failed";
+        return;
+    }
+    ev.events = EPOLLIN | EPOLLET;
+    ev.data.fd = conn_sock;
+    context->AddEvent(address, conn_sock, ev, new task(conn_sock));
 }
 
-std::string TcpServer::ProcessRead(int n) {
+std::string TcpServer::task::ProcessRead() {
     char buffer[1024];
-    int len = read(events[n].data.fd, buffer, 1024);
-    if (len == -1) {
+    int len = read(fd, buffer, 1024);
+    if (len < -1) {
         throw std::runtime_error("Read failed");
     }
-    std::string buf;
-    try {
-        buf = std::string(buffer, len);
-    } catch (...) {
-        buf = "";
+    if (len == 0) {
+        return "";
     }
-    return buf;
+    std::string s;
+    s = std::string(buffer, len);
+    return s;
 }
 
-void TcpServer::ProcessWrite(const std::string &text, int n) {
-    for (const auto &buf : SplitTextByCharacter(text, '\n')) {
+void TcpServer::task::ProcessWrite(const std::string &s) {
+    for (const auto &text : SplitTextByCharacter(s, '\n')) {
         struct addrinfo hints{}, *infoptr = nullptr;
         hints.ai_family = AF_INET;
         hints.ai_flags = 0;
         hints.ai_socktype = SOCK_STREAM;
-        if (int res = getaddrinfo(buf.data(), NULL, &hints, &infoptr)) {
+        if (int res = getaddrinfo(text.data(), NULL, &hints, &infoptr)) {
             std::string error = gai_strerror(res);
             error.push_back('\n');
-            write(events[n].data.fd, error.c_str(), error.size());
+            write(fd, error.c_str(), error.size());
             freeaddrinfo(infoptr);
             return;
         }
         struct addrinfo *p;
-        std::string s;
+        std::string tmp;
 
         for (p = infoptr; p != NULL; p = p->ai_next) {
             char host[256];
             if (int res = getnameinfo(p->ai_addr, p->ai_addrlen, host, sizeof(host), NULL, 0, NI_NUMERICHOST)) {
                 std::string err = gai_strerror(res);
-                s += '\n';
-                if (write(events[n].data.fd, err.c_str(), err.size()) == -1) {
+                tmp += '\n';
+                if (write(fd, err.c_str(), err.size()) == -1) {
                     std::cout << "Write failed\n";
                     break;
                 }
             }
-            s += host;
-            s += "\n";
+            tmp += host;
+            tmp += "\n";
         }
 
-        s += "\n";
+        tmp += "\n";
 
-        if (write(events[n].data.fd, s.c_str(), s.size()) == -1) {
+        if (write(fd, tmp.c_str(), tmp.size()) == -1) {
             std::cout << "Write failed\n";
         }
 
@@ -184,58 +110,46 @@ void TcpServer::ProcessWrite(const std::string &text, int n) {
     }
 }
 
-void TcpServer::ProcessSignalfd() {
-    struct signalfd_siginfo info;
-    if (!read(signal_fd, &info, sizeof(info))) {
-        std::cout << "Can't read signalfd" << signal_fd;
-        return;
-    }
+TcpServer::task::task(int fd) : fd(fd) {
+}
 
-    unsigned sig = info.ssi_signo;
-    unsigned user = info.ssi_uid;
-    if (sig == SIGINT) {
-        std::cout << "Got SIGINT from user " << user << '\n';
-        NeedToStop = true;
-    }
-    if (sig == SIGTERM) {
-        std::cout << "Got SIGTERM from user " << user << '\n';
-        NeedToStop = true;
+void TcpServer::task::operator()() {
+    try {
+        auto s = ProcessRead();
+        ProcessWrite(s);
+    } catch (const std::runtime_error &e) {
+        std::cout << e.what() << '\n';
     }
 }
 
-void TcpServer::AddConnection() {
-    int addrlen = sizeof(address);
-    int conn_sock = accept(server_fd, (struct sockaddr *) &address,
-                           (socklen_t *) &addrlen);
-    ev.events = EPOLLIN | EPOLLET;
-    ev.data.fd = conn_sock;
-    if (epoll_ctl(epollfd, EPOLL_CTL_ADD, conn_sock, &ev)) {
-        std::cout << "New connection failed\n";
-    } else {
-        std::cout << "New connection succesfuly added\n";
-        Timer.Add(conn_sock);
-        Quota.Add(address.sin_addr.s_addr, conn_sock);
-    }
-}
-
-std::vector<std::string> TcpServer::SplitTextByCharacter(const std::string &s, char delim) {
+std::vector<std::string> TcpServer::task::SplitTextByCharacter(const std::string &s, char delim) {
     std::vector<std::string> tokens;
     std::string token;
     std::istringstream tokenStream(s);
+    bool is_first = true;
     while (std::getline(tokenStream, token, delim)) {
-        while (!token.empty() && (token.back() == '\r' || token.back() == '\n')) {
+        while (!token.empty() && token.back() == '\r') {
             token.pop_back();
         }
-        tokens.push_back(token);
+        if (is_first) {
+            tokens.push_back(buf + token);
+            is_first = false;
+        }
+    }
+    if (s.back() != '\n' && s.back() != '\r' && !tokens.empty()) {
+        buf = tokens.back();
+        tokens.pop_back();
+    } else {
+        buf.clear();
+    }
+
+    if (buf.size() > MAX_BUF_SIZE) {
+        tokens.push_back(buf);
+        buf.clear();
     }
     return tokens;
 }
 
-void TcpServer::Stop() {
-    NeedToStop = true;
-}
-
-void TcpServer::BlockingStart() {
-    auto thr = std::thread([this]() { this->Loop(); });
-    thr.join();
+TcpServer::task::~task() {
+    close(fd);
 }

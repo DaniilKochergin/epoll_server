@@ -5,7 +5,7 @@
 #include <vector>
 #include <unordered_map>
 
-#define SOCKET_WAIT_TIME 60
+#define SOCKET_WAIT_TIME 120
 
 class DeadlineTimer {
 public:
